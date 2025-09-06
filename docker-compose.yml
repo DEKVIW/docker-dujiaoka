@@ -1,0 +1,92 @@
+version: "3.8"
+
+services:
+  # MariaDB 数据库
+  mysql:
+    image: mariadb:10.11
+    container_name: integrated_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: CHANGE_YOUR_ROOT_PASSWORD # MySQL root密码，可修改，需与healthcheck中的密码一致
+      MYSQL_DATABASE: dujiaoka
+      MYSQL_USER: dujiaoka
+      MYSQL_PASSWORD: CHANGE_YOUR_DB_PASSWORD # 应用数据库用户密码，可修改，需与dujiaoka和epusdt的.env文件中的DB_PASSWORD/mysql_passwd一致
+      TZ: Asia/Shanghai
+    volumes:
+      - ./mysql:/var/lib/mysql
+      - ./initdb:/docker-entrypoint-initdb.d
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-pCHANGE_YOUR_ROOT_PASSWORD",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - integrated_network
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: integrated_redis
+    restart: always
+    volumes:
+      - ./redis/data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - integrated_network
+
+  # Dujiaoka 服务
+  dujiaoka:
+    image: yilan666/dujiaoka:latest
+    container_name: dujiaoka
+    restart: always
+    environment:
+      WEB_DOCUMENT_ROOT: "/app/public"
+      TZ: Asia/Shanghai
+    ports:
+      - "8988:80"
+      - "9797:9000"
+    volumes:
+      - ./dujiaoka/storage:/app/storage
+      - ./dujiaoka/uploads:/app/public/uploads
+      - ./dujiaoka/env.conf:/app/.env
+      - ./dujiaoka/install.lock:/app/install.lock
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - integrated_network
+
+  # EPUSDT 服务
+  epusdt:
+    image: yilan666/epusdt:latest
+    container_name: epusdt
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "8686:8000"
+    volumes:
+      - ./epusdt/env.conf:/app/.env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - integrated_network
+
+networks:
+  integrated_network:
+    driver: bridge
